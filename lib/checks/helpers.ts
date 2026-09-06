@@ -100,3 +100,29 @@ function compareFindings(left: Finding, right: Finding): number {
 function severityRank(severity: Severity): number {
   return { high: 0, medium: 1, low: 2 }[severity];
 }
+
+const LOCKFILE_NAMES = new Set([
+  "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+  "bun.lock", "bun.lockb", "cargo.lock", "composer.lock", "pipfile.lock",
+  "poetry.lock", "uv.lock", "gemfile.lock", "mix.lock", "podfile.lock",
+  "gradle.lockfile", ".terraform.lock.hcl", "go.sum",
+]);
+
+// Presence checks run over the repository tree, not the fetched subset, so an
+// absence finding never reports a file that exists but was not downloaded.
+export function isReadmePath(path: string): boolean {
+  return /^README[^/]*$/i.test(path);
+}
+
+export function isEnvExamplePath(path: string): boolean {
+  return /(^|\/)\.env\.(example|sample|template)$/i.test(path);
+}
+
+export function isWorkflowPath(path: string): boolean {
+  return /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(path);
+}
+
+export function isLockfilePath(path: string): boolean {
+  const filename = path.split("/").at(-1)?.toLowerCase();
+  return Boolean(filename && (LOCKFILE_NAMES.has(filename) || filename.endsWith(".lock")));
+}

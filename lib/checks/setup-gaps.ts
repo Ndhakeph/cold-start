@@ -1,34 +1,26 @@
 import type { Finding, ScannedFile } from "@/types";
 import {
   capFindings,
+  evidenceForLine,
+  findLine,
   firstEvidence,
-  isEnvExample,
-  isReadme,
+  isEnvExamplePath,
+  isLockfilePath,
+  isReadmePath,
+  isWorkflowPath,
   makeFindingId,
 } from "@/lib/checks/helpers";
 import { environmentReads } from "@/lib/checks/missing-env";
 
-const LOCKFILE_NAMES = new Set([
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lock",
-  "bun.lockb",
-  "cargo.lock",
-  "composer.lock",
-  "pipfile.lock",
-  "poetry.lock",
-  "uv.lock",
-  "gemfile.lock",
-  "mix.lock",
-  "podfile.lock",
-  "gradle.lockfile",
-  ".terraform.lock.hcl",
-  "go.sum",
-]);
-
-export function setupGaps(files: ScannedFile[]) {
+/**
+ * Absence is the hardest thing to report honestly: the scanner downloads a
+ * subset of the repository, so "not in the files we read" is not the same as
+ * "not in the repository". Every presence test below runs against
+ * `repositoryPaths` — the full git tree — while content tests run against the
+ * files actually fetched.
+ */
+export function setupGaps(files: ScannedFile[], repositoryPaths: string[] = []) {
+  const paths = repositoryPaths.length > 0 ? repositoryPaths : files.map((file) => file.path);
   const packageFile = files.find((file) => file.path === "package.json");
   const makefile = files.find((file) => /^makefile$/i.test(file.path));
   const manifest = packageFile ?? files.find((file) => /^(pyproject\.toml|requirements\.txt)$/i.test(file.path));
@@ -37,44 +29,56 @@ export function setupGaps(files: ScannedFile[]) {
 
   if (!anchor) return capFindings("setup-gaps", findings);
 
-  if (manifest && !files.some(isLockfile)) {
-    findings.push(absenceFinding("no-lockfile", "No lockfile found", "This project has a package manifest but no recognized lockfile was fetched.", anchor));
+  if (manifest && !paths.some(isLockfilePath)) {
+    findings.push(absenceFinding(
+      "no-lockfile",
+      "No lockfile found",
+      "This project declares a package manifest but the repository contains no recognised lockfile, so installs are not reproducible.",
+      firstEvidence(manifest),
+    ));
   }
 
   const reads = environmentReads(files.filter(isApplicationSource));
-  if (reads.length > 0 && !files.some(isEnvExample)) {
+  if (reads.length > 0 && !paths.some(isEnvExamplePath)) {
     const source = reads[0];
     findings.push({
       id: makeFindingId("setup-gaps", source.file.path, source.line, "no-env-example"),
       severity: "medium",
       title: "No environment example file",
-      detail: "The application reads environment variables but no .env.example or .env.sample was fetched.",
-      evidence: {
-        path: source.file.path,
-        line: source.line,
-        snippet: source.file.content.split(/\r?\n/)[source.line - 1]?.trim(),
-      },
+      detail: "The application reads environment variables but the repository contains no .env.example or .env.sample.",
+      evidence: evidenceForLine(source.file, source.line),
     });
   }
 
   if ((packageFile || makefile) && !hasTestCommand(packageFile, makefile)) {
-    findings.push(absenceFinding("no-test-command", "No test command found", "package.json and the Makefile do not declare a test command.", packageFile ?? makefile!));
+    const host = packageFile ?? makefile!;
+    findings.push(absenceFinding(
+      "no-test-command",
+      "No test command found",
+      "Neither package.json nor the Makefile declares a test command, so there is no agreed way to verify a change.",
+      packageFile ? findLine(packageFile, /"scripts"\s*:/) : firstEvidence(host),
+    ));
   }
 
-  if (!files.some((file) => /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(file.path))) {
-    findings.push(absenceFinding("no-ci", "No CI workflow found", "No GitHub Actions workflow was fetched from .github/workflows/.", anchor));
+  if (!paths.some(isWorkflowPath)) {
+    findings.push(absenceFinding(
+      "no-ci",
+      "No CI workflow found",
+      "The repository contains no GitHub Actions workflow under .github/workflows/, so nothing verifies a push.",
+      firstEvidence(anchor),
+    ));
   }
 
-  if (!files.some(isReadme)) {
-    findings.push(absenceFinding("no-readme", "No README found", "No root README file was fetched for this repository.", anchor));
+  if (!paths.some(isReadmePath)) {
+    findings.push(absenceFinding(
+      "no-readme",
+      "No README found",
+      "The repository has no root README, so there is no stated entry point for a new reader.",
+      firstEvidence(anchor),
+    ));
   }
 
   return capFindings("setup-gaps", findings);
-}
-
-function isLockfile(file: ScannedFile): boolean {
-  const filename = file.path.split("/").at(-1)?.toLowerCase();
-  return Boolean(filename && (LOCKFILE_NAMES.has(filename) || filename.endsWith(".lock")));
 }
 
 function isApplicationSource(file: ScannedFile): boolean {
@@ -100,9 +104,8 @@ function absenceFinding(
   label: string,
   title: string,
   detail: string,
-  anchor: ScannedFile,
+  evidence: ReturnType<typeof firstEvidence>,
 ): Finding {
-  const evidence = firstEvidence(anchor);
   return {
     id: makeFindingId("setup-gaps", evidence.path, evidence.line, label),
     severity: "medium",

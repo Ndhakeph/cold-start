@@ -4,7 +4,8 @@ A preflight check for coding agents. Paste a public GitHub repo URL and get back
 grounded `AGENTS.md`, a landmine report where every finding cites a file, and three
 next-task prompts you can paste straight into Codex.
 
-**Live:** _add Vercel URL_
+**Live:** https://cold-start-kappa.vercel.app  
+**Presentation:** [`docs/cold-start.pdf`](docs/cold-start.pdf)
 
 ## The problem
 

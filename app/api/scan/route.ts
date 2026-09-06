@@ -23,10 +23,13 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const snapshot = await fetchScanSnapshot(input.url);
+    const repositoryPaths = snapshot.tree
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => entry.path);
     const checks: CheckResult[] = [
       commandDrift(snapshot.files),
       missingEnv(snapshot.files),
-      setupGaps(snapshot.files),
+      setupGaps(snapshot.files, repositoryPaths),
       unfinished(snapshot.files),
     ];
     const findings = checks.flatMap((check) => check.findings);
