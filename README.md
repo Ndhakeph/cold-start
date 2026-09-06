@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cold Start
 
-## Getting Started
+A preflight check for coding agents. Paste a public GitHub repo URL and get back a
+grounded `AGENTS.md`, a landmine report where every finding cites a file, and three
+next-task prompts you can paste straight into Codex.
 
-First, run the development server:
+**Live:** _add Vercel URL_
+
+## The problem
+
+Point a coding agent at an unfamiliar or stale repo and it spends its first ten
+minutes guessing: what the build command is, which directories matter, what is
+half-finished, and which of the README's instructions are still true. Everyone
+writes an `AGENTS.md` by hand, once, and never updates it.
+
+## What it does
+
+Cold Start reads the repository and produces, in about ten seconds and with no model
+call:
+
+- **A repo map** — detected stack, entrypoints, top-level directory roles, and the
+  real dev/build/test/lint commands, each shown with the file it came from.
+- **A landmine report** — the things that make an agent fail:
+  - `missing-env` — environment variables read in source with no `.env.example` or
+    README entry
+  - `command-drift` — README commands that are not declared scripts or Makefile
+    targets, and declared scripts the README never mentions
+  - `setup-gaps` — no lockfile, no test command, no CI workflow, no README
+  - `unfinished` — TODO/FIXME/HACK markers, skipped tests and merge-conflict
+    markers, aggregated per file
+- **A generated `AGENTS.md`** — copy or download it straight into the repo you
+  scanned.
+
+Then a single model call adds a plain-English summary, a read on why the project
+stalled, and three next tasks written as ready-to-paste Codex prompts.
+
+## Why it is trustworthy
+
+Every finding carries evidence: a file path and the line or snippet it came from. If
+a claim cannot be cited, it is not reported. Severity is fixed in code per check, not
+decided by a model.
+
+The deterministic layer and the model layer are strictly separated. The checks are
+pure functions with no I/O, and `lib/llm.ts` is the only file that talks to OpenAI. If
+that call fails, times out, or the key is absent, the repo map, the findings and the
+generated `AGENTS.md` all still render. The scan degrades; it does not break.
+
+The scan also reports its own coverage — "scanned 32 of 64 files" — so you know
+exactly how much of the repository the findings rest on.
+
+## Run it locally
 
 ```bash
+git clone https://github.com/Ndhakeph/cold-start
+cd cold-start
+npm install
+cp .env.example .env.local   # add OPENAI_API_KEY, and GITHUB_TOKEN if you have one
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`GITHUB_TOKEN` is optional but recommended — unauthenticated GitHub API access is
+capped at 60 requests per hour.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Architecture
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/page.tsx            single screen: input, loading, report
+app/api/scan/route.ts   POST { url } -> ScanResult, the only orchestration layer
+lib/github.ts           all GitHub fetching; nothing else touches the network
+lib/checks/*.ts         one pure function per check
+lib/map.ts              repo map derivation, pure
+lib/agentsmd.ts         renders AGENTS.md from a ScanResult, pure
+lib/llm.ts              the single OpenAI call
+types.ts                ScanResult and every sub-type
+```
 
-## Learn More
+Next.js (App Router), TypeScript, Tailwind. No database, no auth.
 
-To learn more about Next.js, take a look at the following resources:
+## Limits
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Public repositories only. Files over 100 KB and generated directories are skipped and
+source-file fetching is capped, so very large monorepos are sampled rather than read
+in full — the coverage line always says how many.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built at Codex Build House Pune, 5 September 2026, with Codex.
