@@ -11,17 +11,20 @@ type Marker = {
   line: number;
 };
 
-const COMMENT_OPENERS = /(\/\/|\/\*|\*|#|--|<!--|"""|''')/;
-const MARKER = /\b(TODO|FIXME|HACK|XXX)\b/i;
+const COMMENT_OPENER = /(\/\/|\/\*|\*|#|--|<!--|"""|''')/;
+// A marker counts as a tag, not as a mention: it either opens the comment, or
+// is followed immediately by a colon, a parenthesis or a dash. Prose that merely
+// names one of these words is not unfinished work.
+const MARKER_TAG = /^[\s*\-]*\b(TODO|FIXME|HACK|XXX)\b|\b(TODO|FIXME|HACK|XXX)\s*[:(\-]/i;
 const SKIPPED_TEST = /\.(?:skip|todo)\s*\(|\b(?:xit|xdescribe)\s*\(|@pytest\.mark\.skip\b/;
 const CONFLICT = /^\s*(<<<<<<<|=======|>>>>>>>)/;
 
 /**
- * Pattern definitions are not unfinished work. A file that searches for the
- * word TODO contains the word TODO, and reporting that is a false positive
- * that costs the whole report its credibility — so a marker only counts when
- * it appears inside a comment, and never on a line that is itself building a
- * regular expression.
+ * Pattern definitions are not unfinished work. A file that searches for these
+ * words necessarily contains them, and reporting that back is a false positive
+ * — the one failure that costs the whole report its credibility. So a marker
+ * counts only inside a comment, only in tag form, and never on a line that is
+ * itself building a regular expression.
  */
 export function unfinished(files: ScannedFile[]) {
   const findings: Finding[] = [];
@@ -56,10 +59,8 @@ function markersInFile(file: ScannedFile): Marker[] {
 
     if (definesAPattern(line)) continue;
 
-    const marker = line.match(MARKER);
-    if (marker && inComment(line, marker.index ?? 0)) {
-      markers.push({ label: marker[1].toUpperCase(), line: lineNumber });
-    }
+    const marker = markerTag(line);
+    if (marker) markers.push({ label: marker, line: lineNumber });
 
     if (SKIPPED_TEST.test(line)) {
       markers.push({ label: "skipped test", line: lineNumber });
@@ -74,7 +75,11 @@ function definesAPattern(line: string): boolean {
   return /\(\?[:=!<]|\\b|\\s|\\d|\[\^/.test(line);
 }
 
-function inComment(line: string, markerIndex: number): boolean {
-  const opener = line.match(COMMENT_OPENERS);
-  return opener !== null && (opener.index ?? Number.MAX_SAFE_INTEGER) < markerIndex;
+function markerTag(line: string): string | null {
+  const opener = line.match(COMMENT_OPENER);
+  if (!opener) return null;
+
+  const body = line.slice((opener.index ?? 0) + opener[0].length);
+  const match = body.match(MARKER_TAG);
+  return match ? (match[1] ?? match[2]).toUpperCase() : null;
 }
